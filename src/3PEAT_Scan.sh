@@ -30,35 +30,30 @@
 #    exit 1
 #fi
 
-#modelName="$1"
-modelFilename=$1
-seqsFile="$2"
-locsFile="$3"
-tfbsFile=$4
-scoreCutoffsFile=$5
-roeFwd=$6
-roeRev=$7
-nucsScanFromTSS=$8
-outputDir=$9
+modelFilename=`readlink -f $1`  # Model file is a sparse matrix containing model coefficients
+seqsFile=$2     # Sequence to scan 
+locsFile=$3     # A bed file containing locations of each sequence
+pwm_file=`readlink -f $4`	  # PWM File
+pwm_zeroes_file=`readlink -f $5`	# PWM_Zeros file
+roeFwd=`readlink -f $6`	  # ROE fed
+roeRev=`readlink -f $7`	  # ROW rev
+nucsScanFromTSS=$8	# half width of scan region centered at TSS (0)
+upstream_len=$9	# needs to compute the genomic location that wig starts
+outputDir=`readlink -f ${10}`	  # Where to place results
+LOGLIK_PATH=${11}
+thisDir=${12}	# working directory
+scripts_dir=${13}
+l1logreg_path=${14}
+downstream_len=${15}
 
-upstream_len=5000
-LOGLIK_PATH="LogLikScanner"
-#roeFwd="ROEs/$modelName/all.0thresh.seqlocalbgfast250.fwd.halfwidths.new9T5P.table"
-#roeRev="ROEs/$modelName/all.0thresh.seqlocalbgfast250.rev.halfwidths.new9T5P.table"
-#modelFilename="Models/$modelName.model"
 
-# This varibale indicats the range that you want to consider in your scan
-# -nucsScanFromTSS to +nucsScanFromTSS
-# 0 -> pnly scan for 1 location which is 0 (tss-mode)
-# 2 -> from -2 to 2
-#nucsScanFromTSS=100
-nucsAfterTSS=5000
+echo $thisDir
+
 let "wig_start_loc = $upstream_len - $nucsScanFromTSS"
 wig_step=1
 bgWin=250
 smoothHalfWin=2
 
-#outputDir=output
 seqsBasename="`basename $seqsFile`"
 scansOut="$outputDir/$seqsBasename.features"
 resultsDir="$outputDir/classification/$seqsBasename"
@@ -68,20 +63,18 @@ wigDir="$outputDir/scans/$seqsBasename"
 function rdatToMM() {
     infile="$1"
     outfile="$2"
-    ./Scripts/Rdat_to_sparse_test_noclass.pl "$infile" "$outfile"
+    $scripts_dir/Rdat_to_sparse_test_noclass.pl "$infile" "$outfile"
 }
 
 function generateScans() {
     outLocation=`readlink -f $1`
-    #outLocation=`$1`
-    thisDir=/nfs0/BPP/Megraw_Lab/mitra/Projects/3PEAT_model/5_3PEAT_scan
-
-    for seqName in `grep '^>' $thisDir/$seqsFile |sed -e 's/^>\([^[:space:]]\+\).*$/\1/'`; do
-        cd "$LOGLIK_PATH/classes"
-        #java loglikscan.SumScoreVarsSeqLocalBG2FastWVEF_MP "Range 1 -$nucsScanFromTSS $nucsScanFromTSS" $nucsAfterTSS $roeFwd $roeRev $thisDir/$seqsFile $scoreCutoffsFile $tfbsFile $bgWin $outLocation/$seqName.Rdat "$seqName"
+    for seqName in `grep '^>' $thisDir/$seqsFile |sed -e 's/^>\([^[:space:]]\+\).*$/\1/'`; do        
+	cd "$LOGLIK_PATH/classes"
+	#echo Range 1 -$nucsScanFromTSS $nucsScanFromTSS $downstream_len $roeFwd $roeRev $thisDir/$seqsFile $pwm_zeroes_file $pwm_file $bgWin $outLocation/$seqName.Rdat $seqName
+        java loglikscan.SumScoreVarsSeqLocalBG2FastWVEF_MP "Range 1 -$nucsScanFromTSS $nucsScanFromTSS" $downstream_len $roeFwd $roeRev $thisDir/$seqsFile $pwm_zeroes_file $pwm_file $bgWin $outLocation/$seqName.Rdat "$seqName"
 
         cd "$thisDir"
-        #rdatToMM "$outLocation/$seqName.Rdat" "$outLocation/$seqName.mm"
+        rdatToMM "$outLocation/$seqName.Rdat" "$outLocation/$seqName.mm"
     done
 }
 
@@ -92,7 +85,7 @@ function classifyExample() {
     outputFile="$4"
 
     echo l1_logreg_classify -p "$modelFilename" "$featuresFile" "$resultsFile" 2>&1 | tee "$outputFile"
-    l1_logreg_classify -p "$modelFilename" "$featuresFile" "$resultsFile" 2>&1 | tee "$outputFile"
+    $l1logreg_path/l1_logreg_classify -p "$modelFilename" "$featuresFile" "$resultsFile" 2>&1 | tee "$outputFile"
 }
 
 function smoothScan() {
@@ -100,14 +93,14 @@ function smoothScan() {
     outputFile="$2"
     smoothWin="$3"
 
-    ./Scripts/results_to_smoothed_results.pl "$smoothWin" "$resultsFile" "$outputFile"
+    $scripts_dir/results_to_smoothed_results.pl "$smoothWin" "$resultsFile" "$outputFile"
 }
 
 function resultsToWig() {
     resultsFile="$1"
     locsFile="$2"
     wigDir="$3"
-    ./Scripts/results_to_wig3.pl $wig_start_loc $wig_step "$resultsFile" "$locsFile"  "$wigDir"
+    $scripts_dir/results_to_wig3.pl $wig_start_loc $wig_step "$resultsFile" "$locsFile"  "$wigDir"
 }
 
 mkdir -p $scansOut
